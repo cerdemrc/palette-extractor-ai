@@ -1,9 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
 import { z } from "zod";
 import { NextResponse } from "next/server";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
 });
 
 const paletteSchema = z.object({
@@ -12,7 +12,7 @@ const paletteSchema = z.object({
       z.object({
         name: z.string(),
         hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-        percentage: z.number().min(0).max(100),
+        percentage: z.coerce.number().min(0).max(100),
       }),
     )
     .length(5),
@@ -50,51 +50,48 @@ export async function POST(request: Request) {
       "base64",
     );
 
-    const response = await ai.interactions.create({
-      model: "gemini-3.8-flash",
-      input: [
+    const completion = await groq.chat.completions.create({
+      model: "qwen/qwen3.8-27b",
+      messages: [
         {
-          type: "text",
-          text: `Analyze this image and identify exactly 5 dominant colors.
-Return each color's name, HEX code and estimated percentage of the image.
-The percentages should add up to approximately 100.
-Return only valid JSON matching the requested schema.`,
-        },
-        {
-          type: "image",
-          data: imageBase64,
-          mime_type: file.type,
-        },
-      ],
-      response_format: {
-        type: "text",
-        mime_type: "application/json",
-        schema: {
-          type: "object",
-          properties: {
-            colors: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  name: { type: "string" },
-                  hex: { type: "string" },
-                  percentage: { type: "number" },
-                },
-                required: ["name", "hex", "percentage"],
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `
+                Analyze this image and identify exactly 5 dominant colors.
+
+                Return a JSON object with a "colors" array.
+                Each color must include:
+                - name: A descriptive color name
+                - hex: A valid 6-digit HEX color code
+                - percentage: Estimated percentage of the image
+
+                Percentages must add up to approximately 100.
+                Return only valid JSON.
+              `,
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${file.type};base64,${imageBase64}`,
               },
             },
-          },
-          required: ["colors"],
+          ],
         },
-      },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      max_completion_tokens: 1024,
     });
 
-    if (!response.output_text) {
-      throw new Error("Gemini returned an empty response.");
+    const content = completion.choices[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("Groq returned an empty response.");
     }
 
-    const palette = paletteSchema.parse(JSON.parse(response.output_text));
+    const palette = paletteSchema.parse(JSON.parse(content));
 
     return NextResponse.json(palette);
   } catch (error) {

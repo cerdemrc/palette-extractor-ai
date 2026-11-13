@@ -1,11 +1,70 @@
 "use client";
 
-import { useState } from "react";
 import Image from "next/image";
+import { useState } from "react";
+
+type Color = {
+  name: string;
+  hex: string;
+  percentage: number;
+};
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
+  const [colors, setColors] = useState<Color[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleImageChange = (selectedFile?: File) => {
+    if (!selectedFile) return;
+
+    if (preview) URL.revokeObjectURL(preview);
+
+    setFile(selectedFile);
+    setPreview(URL.createObjectURL(selectedFile));
+    setColors([]);
+    setError("");
+  };
+
+  const handleAnalyze = async () => {
+    if (!file) return;
+
+    setIsAnalyzing(true);
+    setError("");
+    setColors([]);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Analysis failed.");
+      }
+
+      setColors(data.colors);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRemove = () => {
+    if (preview) URL.revokeObjectURL(preview);
+
+    setFile(null);
+    setPreview("");
+    setColors([]);
+    setError("");
+  };
 
   return (
     <main className="min-h-screen bg-[#faf9f6] px-6 py-8 text-zinc-900">
@@ -35,6 +94,7 @@ export default function Home() {
                 width={600}
                 height={400}
                 unoptimized
+                style={{ width: "auto", height: "auto" }}
                 className="max-h-56 max-w-full rounded-xl object-contain"
               />
             ) : (
@@ -52,7 +112,7 @@ export default function Home() {
                 </span>
 
                 <span className="mt-5 text-xs text-zinc-400">
-                  PNG, JPG or WEBP
+                  PNG, JPG or WEBP · Max 5 MB
                 </span>
               </>
             )}
@@ -61,34 +121,74 @@ export default function Home() {
               type="file"
               accept="image/png,image/jpeg,image/webp"
               className="hidden"
-              onChange={(event) => {
-                const selectedFile = event.target.files?.[0];
-
-                if (selectedFile) {
-                  setFile(selectedFile);
-                  setPreview(URL.createObjectURL(selectedFile));
-                }
-              }}
+              onChange={(event) => handleImageChange(event.target.files?.[0])}
             />
           </label>
 
           {file && (
-            <div className="mt-5 flex flex-col items-center gap-3">
+            <div className="mt-5 flex flex-col items-center gap-4">
               <p className="text-sm text-zinc-500">
                 Selected:{" "}
                 <span className="font-medium text-zinc-800">{file.name}</span>
               </p>
 
-              <button
-                onClick={() => {
-                  URL.revokeObjectURL(preview);
-                  setFile(null);
-                  setPreview("");
-                }}
-                className="text-sm font-medium text-violet-600 hover:text-violet-800"
-              >
-                Remove image
-              </button>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleRemove}
+                  disabled={isAnalyzing}
+                  className="text-sm font-medium text-zinc-500 hover:text-zinc-800 disabled:opacity-50"
+                >
+                  Remove image
+                </button>
+
+                <button
+                  onClick={handleAnalyze}
+                  disabled={isAnalyzing}
+                  className="rounded-xl bg-violet-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isAnalyzing ? "Analyzing..." : "Analyze Image"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="mt-6 text-sm text-red-600">{error}</p>}
+
+          {colors.length > 0 && (
+            <div className="mt-16 text-left">
+              <h2 className="text-xl font-bold">Your color palette</h2>
+              <p className="mt-2 text-sm text-zinc-500">
+                Five dominant colors extracted by AI.
+              </p>
+
+              <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-5">
+                {colors.map((color) => (
+                  <div
+                    key={color.hex}
+                    className="overflow-hidden rounded-xl border border-zinc-200 bg-white"
+                  >
+                    <div
+                      className="h-28 w-full"
+                      style={{ backgroundColor: color.hex }}
+                    />
+                    <div className="p-3">
+                      <p className="truncate text-sm font-semibold">
+                        {color.name}
+                      </p>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(color.hex)}
+                        className="mt-1 text-sm text-zinc-500 hover:text-violet-600"
+                        title="Copy HEX code"
+                      >
+                        {color.hex}
+                      </button>
+                      <p className="mt-2 text-xs text-zinc-400">
+                        {color.percentage}%
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </section>
